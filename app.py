@@ -6,28 +6,28 @@ import pickle
 import requests
 from datetime import datetime
 
-# --- CONFIG ---
-days_out_to_predict = 7
-model_filename = "xgb_model.pkl"
+st.set_page_config(page_title="Earthquake Prediction App", layout="wide")
 
-# --- HELPER FUNCTIONS ---
+# Load model
+with open("xgb_model.pkl", "rb") as f:
+    model = pickle.load(f)
 
-@st.cache_data(show_spinner="Loading live earthquake data...")
+# Load live earthquake data from USGS
+@st.cache_data(show_spinner="Fetching live earthquake data...")
 def get_live_earthquake_data():
     url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
     response = requests.get(url)
     data = response.json()
-
-    features = data["features"]
     records = []
-    for feature in features:
-        prop = feature["properties"]
+
+    for feature in data["features"]:
+        props = feature["properties"]
         geom = feature["geometry"]
         if geom and geom["type"] == "Point":
             coords = geom["coordinates"]
-            longitude, latitude, depth = coords[0], coords[1], coords[2]
-            mag = prop.get("mag", None)
-            time = pd.to_datetime(prop["time"], unit='ms')
+            longitude, latitude, depth = coords
+            mag = props.get("mag", None)
+            time = pd.to_datetime(props["time"], unit="ms")
             records.append({
                 "latitude": latitude,
                 "longitude": longitude,
@@ -37,64 +37,39 @@ def get_live_earthquake_data():
             })
 
     df = pd.DataFrame(records)
+    df.dropna(inplace=True)
     return df
 
-def load_local_model(filename):
-    with open(filename, "rb") as file:
-        return pickle.load(file)
+# Predict on live data
+def predict_earthquake(df):
+    X_live = df[["latitude", "longitude", "depth", "mag"]]
+    dmatrix = xgb.DMatrix(X_live)
+    predictions = model.predict(dmatrix)
+    df["prediction"] = np.round(predictions, 3)
+    return df
 
-# --- MAIN APP ---
+# App title
+st.title("🌍 Live Earthquake Risk Predictor")
 
-st.set_page_config(page_title="Earthquake Prediction App", layout="wide")
-st.title("🌍 Earthquake Risk Prediction App")
+# Fetch and predict
+df_live = get_live_earthquake_data()
+df_result = predict_earthquake(df_live)
 
-# Load model
-try:
-    model = load_local_model(model_filename)
-except FileNotFoundError:
-    st.error(f"Model file '{model_filename}' not found. Please upload it to your repo.")
-    st.stop()
+# Show predictions
+st.subheader("Live Predictions")
+st.dataframe(df_result[["date", "latitude", "longitude", "depth", "mag", "prediction"]])
 
-# Get live data
-live_data = get_live_earthquake_data()
-
-if live_data.empty:
-    st.warning("No live earthquake data available.")
-    st.stop()
-
-st.subheader("📊 Live Earthquake Data (Last 24 Hours)")
-st.dataframe(live_data.head(20))
-
-# Predicting earthquake risk (just an example)
-st.subheader("⚠️ Risk Prediction from Live Data")
-
-try:
-    X_live = live_data[["latitude", "longitude", "depth", "mag"]]
-    risk_pred = model.predict(xgb.DMatrix(X_live))
-    live_data["Predicted Risk Score"] = np.round(risk_pred, 2)
-    st.map(live_data[["latitude", "longitude"]])
-    st.dataframe(live_data[["latitude", "longitude", "depth", "mag", "Predicted Risk Score"]].head(20))
-except Exception as e:
-    st.error(f"Prediction failed: {e}")
+# Show map
+st.map(df_result.rename(columns={"latitude": "lat", "longitude": "lon"}))
 
 # Custom prediction section
-st.subheader("📍 Custom Earthquake Risk Prediction")
-with st.form("custom_prediction_form"):
-    latitude = st.number_input("Latitude", -90.0, 90.0, 0.0)
-    longitude = st.number_input("Longitude", -180.0, 180.0, 0.0)
-    depth = st.number_input("Depth (km)", 0.0, 700.0, 10.0)
-    magnitude = st.number_input("Magnitude", 0.0, 10.0, 4.5)
-    submitted = st.form_submit_button("Predict Risk")
+st.sidebar.header("🔍 Custom Earthquake Input")
+lat = st.sidebar.number_input("Latitude", value=19.0)
+lon = st.sidebar.number_input("Longitude", value=77.0)
+depth = st.sidebar.number_input("Depth (km)", value=10.0)
+mag = st.sidebar.number_input("Magnitude", value=4.0)
 
-    if submitted:
-        input_df = pd.DataFrame([{
-            "latitude": latitude,
-            "longitude": longitude,
-            "depth": depth,
-            "mag": magnitude
-        }])
-        try:
-            pred = model.predict(xgb.DMatrix(input_df))
-            st.success(f"Predicted Earthquake Risk Score: {pred[0]:.2f}")
-        except Exception as e:
-            st.error(f"Prediction failed: {e}")
+if st.sidebar.button("Predict Risk"):
+    custom_df = pd.DataFrame([[lat, lon, depth, mag]], columns=["latitude", "longitude", "depth", "mag"])
+    pred = model.predict(xgb.DMatrix(custom_df))[0]
+    st.sidebar.success(f"Predicted Risk: {round(pred, 3)}")
