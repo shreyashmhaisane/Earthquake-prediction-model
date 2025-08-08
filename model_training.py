@@ -2,22 +2,21 @@ import pandas as pd
 import xgboost as xgb
 import pickle
 
-# Load your existing data used for training (replace with actual source)
-df = pd.read_csv("your_training_data.csv")  # Update path if needed
+# Simulated training data (replace with your actual dataset)
+df = pd.read_csv("your_training_data.csv")
 
-# Ensure required columns exist
-df = df[["latitude", "longitude", "depth", "mag"]].dropna()
+# Use consistent features
+features = ["latitude", "longitude", "depth", "mag"]
+df = df[features].dropna()
 
-# Create a dummy target column (replace with real target logic)
-# For example, classify if magnitude > 4.5
+# Example target: classify as "high risk" if magnitude > 4.5
 df["target"] = (df["mag"] > 4.5).astype(int)
 
-# Split features and target
-X = df[["latitude", "longitude", "depth", "mag"]]
+# Train model
+X = df[features]
 y = df["target"]
+dtrain = xgb.DMatrix(X, label=y, feature_names=features)
 
-# Train XGBoost model
-dtrain = xgb.DMatrix(X, label=y)
 params = {"objective": "binary:logistic", "eval_metric": "logloss"}
 model = xgb.train(params, dtrain, num_boost_round=50)
 
@@ -25,4 +24,4 @@ model = xgb.train(params, dtrain, num_boost_round=50)
 with open("xgb_model.pkl", "wb") as f:
     pickle.dump(model, f)
 
-print("✅ Model trained and saved as xgb_model.pkl")
+print("✅ Model trained with feature names:", features)
